@@ -1,0 +1,12 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    # マイナー・パッチは1つの PR にまとめる（メジャーはパッケージごとに別の PR）
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
