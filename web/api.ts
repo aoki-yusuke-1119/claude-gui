@@ -24,6 +24,10 @@ export const api = {
       'GET',
       `/api/tree?${new URLSearchParams({ repo, path }).toString()}`
     ).then((r) => r.entries),
+  openFile: (repo: string, path: string) =>
+    request<{ ok: true; revealed: boolean }>('POST', '/api/files/open', { repo, path }),
+  trashFile: (repo: string, path: string) =>
+    request<{ ok: true }>('POST', '/api/files/trash', { repo, path }),
   sessions: (repo: string) =>
     request<{ sessions: PastSession[] }>(
       'GET',

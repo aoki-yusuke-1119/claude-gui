@@ -1,6 +1,7 @@
-import { type RefObject, useLayoutEffect, useRef } from 'react'
+import { type PointerEvent, type RefObject, useLayoutEffect, useRef } from 'react'
 
 import type {
+  ClientMessage,
   PermissionDecision,
   PermissionModeOption,
   TabInfo,
@@ -8,10 +9,16 @@ import type {
 } from '../../shared/protocol'
 import { Composer } from './Composer'
 import { EditableTitle } from './EditableTitle'
-import { CopyIcon } from './icons'
+import { CloseIcon, CopyIcon } from './icons'
 import { MessageList } from './MessageList'
 import { PermissionCard } from './PermissionCard'
 import { displayTitle } from './TabBar'
+import { startDrag } from '../drag'
+import { TerminalPanel } from './TerminalPanel'
+
+const MIN_TERMINAL_HEIGHT = 120
+// チャット欄と入力欄の分は残す
+const RESERVED_CHAT_HEIGHT = 280
 
 const PERMISSION_MODE_LABELS: Record<PermissionModeOption, string> = {
   default: '都度確認（default）',
@@ -33,7 +40,13 @@ interface Props {
   onRespond: (requestId: string, decision: PermissionDecision) => void
   onRename: (title: string) => void
   onModeChange: (mode: PermissionModeOption) => void
-  onCopy: (text: string) => void
+  onCopy: (text: string, message?: string) => void
+  terminalOpen: boolean
+  terminalHeight: number
+  terminalFocusSignal: number
+  onToggleTerminal: () => void
+  onTerminalHeightChange: (height: number) => void
+  send: (message: ClientMessage) => boolean
 }
 
 export function ChatPane(props: Props) {
@@ -75,13 +88,17 @@ export function ChatPane(props: Props) {
         </label>
         {tab.sessionId && (
           <button
-            className="icon-button"
-            title="ターミナルの Claude Code で再開するコマンドをコピー"
+            className="header-button"
+            title="この会話をターミナル版の Claude Code で続けるコマンドをコピーします。GUI と同時に同じ会話を進めないでください"
             onClick={() =>
-              props.onCopy(`cd '${repoDir}' && claude --resume ${tab.sessionId ?? ''}`)
+              props.onCopy(
+                `cd '${repoDir}' && claude --resume ${tab.sessionId ?? ''}`,
+                '再開コマンドをコピーしました。ターミナルに貼り付けて実行すると、この会話の続きから使えます'
+              )
             }
           >
             <CopyIcon />
+            CLI で再開
           </button>
         )}
       </div>
@@ -117,7 +134,47 @@ export function ChatPane(props: Props) {
         onChange={props.onDraftChange}
         onSend={props.onSend}
         onInterrupt={props.onInterrupt}
+        terminalOpen={props.terminalOpen}
+        onToggleTerminal={props.onToggleTerminal}
       />
+      {props.terminalOpen && (
+        <div className="terminal" style={{ height: props.terminalHeight }}>
+          <div
+            className="terminal-header"
+            title="ドラッグで高さを変更"
+            onPointerDown={(e) => startTerminalResize(e, props)}
+          >
+            <span className="terminal-title">ターミナル</span>
+            <span className="terminal-cwd">{repoDir}</span>
+            <button
+              className="icon-button"
+              title="ターミナルを閉じる（⌘J）。シェルは動いたままです"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={props.onToggleTerminal}
+            >
+              <CloseIcon />
+            </button>
+          </div>
+          <TerminalPanel
+            tabId={tab.id}
+            repo={tab.repo}
+            connected={props.connected}
+            focusSignal={props.terminalFocusSignal}
+            send={props.send}
+          />
+        </div>
+      )}
     </div>
   )
+}
+
+// 見出しを上下にドラッグしてターミナルの高さを変える
+function startTerminalResize(e: PointerEvent<HTMLDivElement>, props: Props): void {
+  const startY = e.clientY
+  const startHeight = props.terminalHeight
+  startDrag(e, (ev) => {
+    const max = Math.max(MIN_TERMINAL_HEIGHT, window.innerHeight - RESERVED_CHAT_HEIGHT)
+    const height = startHeight + (startY - ev.clientY)
+    props.onTerminalHeightChange(Math.round(Math.min(max, Math.max(MIN_TERMINAL_HEIGHT, height))))
+  })
 }

@@ -8,6 +8,8 @@ interface Props {
   onChange: (value: string) => void
   onSend: () => void
   onInterrupt: () => void
+  terminalOpen: boolean
+  onToggleTerminal: () => void
 }
 
 // Slack と同じく Enter は改行、⌘+Enter（Windows/Linux では Ctrl+Enter）で送信する
@@ -19,6 +21,8 @@ export function Composer({
   onChange,
   onSend,
   onInterrupt,
+  terminalOpen,
+  onToggleTerminal,
 }: Props) {
   useLayoutEffect(() => {
     const el = textareaRef.current
@@ -49,6 +53,13 @@ export function Composer({
           <code>@パス</code> を挿入
         </span>
         {!connected && <span className="hint error">サーバーに接続していません</span>}
+        <button
+          className={`terminal-toggle${terminalOpen ? ' active' : ''}`}
+          title="ターミナルを開く／閉じる"
+          onClick={onToggleTerminal}
+        >
+          ターミナル <kbd>⌘J</kbd>
+        </button>
         {busy && (
           <button className="danger" onClick={onInterrupt}>
             中断

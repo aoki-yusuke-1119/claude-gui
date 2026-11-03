@@ -11,9 +11,10 @@ import { DATA_FILE, DIST_DIR, PORT, ROOT_DIR } from './config'
 export { ROOT_DIR }
 import { errorMessage, HttpError } from './errors'
 import { addClient, broadcast, sendTo } from './hub'
-import { assertRepo, listRepos, listTree, repoPath } from './repos'
+import { assertRepo, listRepos, listTree, openEntry, repoPath, trashEntry } from './repos'
 import { isPermissionMode, SessionManager } from './session'
 import { TabStore } from './tabs'
+import { TerminalManager } from './terminal'
 import { UsageMonitor } from './usage'
 
 const store: TabStore = new TabStore(DATA_FILE, () =>
@@ -21,6 +22,7 @@ const store: TabStore = new TabStore(DATA_FILE, () =>
 )
 const usage: UsageMonitor = new UsageMonitor(() => sessions.anyActiveQuery())
 const sessions = new SessionManager(store, (query) => usage.onTurnEnd(query))
+const terminals = new TerminalManager()
 
 const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]'])
 // 開発時（yarn dev）だけ Vite の画面（vite.config.ts の server.port）からの接続も許可する
@@ -110,6 +112,8 @@ async function updateTab(id: string, body: Record<string, unknown>): Promise<Tab
       throw new HttpError(409, 'セッション開始後はリポジトリを変更できません')
     }
     await assertRepo(body.repo)
+    // ターミナルは元のリポジトリで動いているので終了し、画面側が新しいリポジトリで開き直す
+    terminals.kill(id)
     store.update(id, { repo: body.repo })
   }
   if (typeof body.title === 'string') {
@@ -136,6 +140,15 @@ async function handleApi(req: http.IncomingMessage, url: URL): Promise<unknown> 
     await assertRepo(repo)
     return { entries: await listTree(repo, stringParam(url, 'path')) }
   }
+  if (method === 'POST' && (route === '/api/files/open' || route === '/api/files/trash')) {
+    const body = await readJson(req)
+    const repo = String(body.repo ?? '')
+    const relPath = String(body.path ?? '')
+    await assertRepo(repo)
+    if (route === '/api/files/open') return { ok: true, ...(await openEntry(repo, relPath)) }
+    await trashEntry(repo, relPath)
+    return { ok: true }
+  }
   if (method === 'GET' && route === '/api/sessions') {
     const repo = stringParam(url, 'repo')
     await assertRepo(repo)
@@ -161,6 +174,7 @@ async function handleApi(req: http.IncomingMessage, url: URL): Promise<unknown> 
   if (tabId && method === 'DELETE') {
     // タブを閉じるだけで、Claude のセッション履歴は残す（履歴から開き直せる）
     sessions.close(tabId)
+    terminals.kill(tabId)
     store.remove(tabId)
     return { ok: true }
   }
@@ -253,6 +267,34 @@ function parseClientMessage(data: unknown): ClientMessage | null {
 }
 
 async function handleClientMessage(ws: WebSocket, message: ClientMessage): Promise<void> {
+  if (message.type === 'term_close') {
+    terminals.close(message.tabId, ws)
+    return
+  }
+  if (
+    message.type === 'term_open' ||
+    message.type === 'term_input' ||
+    message.type === 'term_resize'
+  ) {
+    const tab = store.get(message.tabId)
+    if (!tab) throw new HttpError(404, `タブが見つかりません: ${message.tabId}`)
+    if (message.type === 'term_open') {
+      let data: string
+      try {
+        data = terminals.open(tab.id, repoPath(tab.repo), message.cols, message.rows, ws)
+      } catch (error) {
+        // 起動に失敗したことを伝え、画面に再起動ボタンを出させる
+        sendTo(ws, { type: 'term_exit', tabId: tab.id, exitCode: -1 })
+        throw error
+      }
+      sendTo(ws, { type: 'term_snapshot', tabId: tab.id, data })
+    } else if (message.type === 'term_input') {
+      terminals.write(tab.id, message.data)
+    } else {
+      terminals.resize(tab.id, message.cols, message.rows)
+    }
+    return
+  }
   if (message.type === 'refresh_usage') {
     await usage.refresh()
     return
@@ -279,6 +321,7 @@ wss.on('connection', (ws: WebSocket) => {
   sendTo(ws, { type: 'tabs', tabs: store.list() })
   if (usage.usage) sendTo(ws, { type: 'usage', usage: usage.usage })
   usage.refreshIfStale()
+  ws.on('close', () => terminals.detach(ws))
   ws.on('message', (data) => {
     const message = parseClientMessage(data)
     if (!message) return
@@ -305,6 +348,7 @@ export async function startServer(): Promise<{ url: string; close: () => void }>
     close: () => {
       usage.stop()
       sessions.closeAll()
+      terminals.killAll()
       server.close()
     },
   }

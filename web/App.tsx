@@ -8,6 +8,7 @@ import {
 } from 'react'
 
 import type {
+  ClientMessage,
   PastSession,
   PermissionDecision,
   PermissionModeOption,
@@ -21,9 +22,11 @@ import { RefreshIcon } from './components/icons'
 import { TabBar } from './components/TabBar'
 import { UsagePanel } from './components/UsagePanel'
 import { copyText } from './clipboard'
+import { startDrag } from './drag'
 import { Socket } from './socket'
 import { initialState, reducer } from './state'
 import { storage } from './storage'
+import { emitTerminalEvent, isTerminalEvent } from './terminalBus'
 
 const MIN_LEFT_WIDTH = 180
 const MAX_LEFT_WIDTH = 720
@@ -45,6 +48,11 @@ export function App() {
   const [treeRefresh, setTreeRefresh] = useState(0)
   const [toast, setToast] = useState<string | null>(null)
   const [leftWidth, setLeftWidth] = useState(() => Number(storage.get('leftWidth')) || 300)
+  const [terminalOpen, setTerminalOpen] = useState(() => storage.get('terminalOpen') === '1')
+  const [terminalHeight, setTerminalHeight] = useState(
+    () => Number(storage.get('terminalHeight')) || 260
+  )
+  const [terminalFocus, setTerminalFocus] = useState(0)
   const socketRef = useRef<Socket | null>(null)
   const subscribed = useRef(new Set<string>())
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -90,6 +98,10 @@ export function App() {
         if (message.type === 'stream') {
           pendingDeltas.set(message.tabId, (pendingDeltas.get(message.tabId) ?? '') + message.delta)
           frame ||= requestAnimationFrame(flush)
+          return
+        }
+        if (isTerminalEvent(message)) {
+          emitTerminalEvent(message)
           return
         }
         // 順序を保つため、ほかのメッセージより先に溜まっている差分を反映する
@@ -191,12 +203,53 @@ export function App() {
     socketRef.current?.send({ type: 'interrupt', tabId: activeTab.id })
   }, [activeTab, activeLive?.busy])
 
-  // Esc で応答を中断する。IME 変換中・1行入力欄・セレクトでの Esc は対象外
+  const sendMessage = useCallback(
+    (message: ClientMessage) => socketRef.current?.send(message) ?? false,
+    []
+  )
+
+  const toggleTerminal = useCallback(() => {
+    if (terminalOpen) {
+      setTerminalOpen(false)
+      requestAnimationFrame(() => textareaRef.current?.focus())
+    } else {
+      setTerminalOpen(true)
+      setTerminalFocus((n) => n + 1)
+    }
+  }, [terminalOpen])
+
+  useEffect(() => {
+    storage.set('terminalOpen', terminalOpen ? '1' : '0')
+  }, [terminalOpen])
+
+  // ドラッグ中は毎回書き込まず、止まってから保存する
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => storage.set('terminalHeight', String(terminalHeight)),
+      300
+    )
+    return () => window.clearTimeout(timer)
+  }, [terminalHeight])
+
+  // ⌘J でターミナルを開閉する（ターミナルにフォーカスがあるときも効くよう capture で受ける）
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!e.metaKey || e.shiftKey || e.altKey || e.ctrlKey || e.key.toLowerCase() !== 'j') return
+      e.preventDefault()
+      e.stopPropagation()
+      toggleTerminal()
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [toggleTerminal])
+
+  // Esc で応答を中断する。IME 変換中・1行入力欄・セレクト・ターミナル内での Esc は対象外
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.isComposing || e.keyCode === 229 || e.defaultPrevented) return
-      const tag = (e.target as HTMLElement | null)?.tagName
-      if (tag === 'INPUT' || tag === 'SELECT') return
+      const target = e.target as HTMLElement | null
+      const tag = target?.tagName
+      if (tag === 'INPUT' || tag === 'SELECT' || target?.closest('.xterm')) return
       if (!activeLive?.busy) return
       e.preventDefault()
       interrupt()
@@ -235,25 +288,18 @@ export function App() {
     })
   }
 
-  const copy = (text: string) => {
-    copyText(text).then(() => setToast('コピーしました'), showError)
+  const copy = (text: string, message = 'コピーしました') => {
+    copyText(text).then(() => setToast(message), showError)
   }
 
   const startResize = (e: ReactPointerEvent<HTMLDivElement>) => {
-    const el = e.currentTarget
-    el.setPointerCapture(e.pointerId)
-    const onMove = (ev: PointerEvent) =>
-      setLeftWidth(Math.min(MAX_LEFT_WIDTH, Math.max(MIN_LEFT_WIDTH, ev.clientX)))
-    const onUp = (ev: PointerEvent) => {
-      el.removeEventListener('pointermove', onMove)
-      el.removeEventListener('pointerup', onUp)
-      storage.set(
-        'leftWidth',
-        String(Math.min(MAX_LEFT_WIDTH, Math.max(MIN_LEFT_WIDTH, ev.clientX)))
-      )
-    }
-    el.addEventListener('pointermove', onMove)
-    el.addEventListener('pointerup', onUp)
+    const widthAt = (ev: PointerEvent) =>
+      Math.min(MAX_LEFT_WIDTH, Math.max(MIN_LEFT_WIDTH, ev.clientX))
+    startDrag(
+      e,
+      (ev) => setLeftWidth(widthAt(ev)),
+      (ev) => storage.set('leftWidth', String(widthAt(ev)))
+    )
   }
 
   const repoLocked = Boolean(activeTab?.sessionId || activeLive?.items.length)
@@ -295,7 +341,9 @@ export function App() {
             key={activeTab.repo}
             repo={activeTab.repo}
             refreshKey={treeRefresh}
-            onSelectFile={insertPath}
+            onInsertPath={insertPath}
+            onError={showError}
+            onNotice={setToast}
           />
         ) : (
           <div className="tree-message">セッションを開くとファイルが表示されます</div>
@@ -341,6 +389,12 @@ export function App() {
               updateActiveTab({ permissionMode })
             }
             onCopy={copy}
+            terminalOpen={terminalOpen}
+            terminalHeight={terminalHeight}
+            terminalFocusSignal={terminalFocus}
+            onToggleTerminal={toggleTerminal}
+            onTerminalHeightChange={setTerminalHeight}
+            send={sendMessage}
           />
         ) : (
           <div className="empty-state">
