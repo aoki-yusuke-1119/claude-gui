@@ -2,21 +2,28 @@ import { Fragment, type ReactNode, useCallback, useEffect, useRef, useState } fr
 
 import type { TreeEntry } from '../../shared/protocol'
 import { api } from '../api'
+import { ContextMenu, type MenuItem } from './ContextMenu'
 import { ChevronIcon, FileIcon, FolderIcon } from './icons'
 
 // リポジトリごとの展開状態（タブやリポジトリを切り替えても保持する）
 const expandedByRepo = new Map<string, Set<string>>()
 
+const parentDir = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '')
+
 interface Props {
   repo: string
   refreshKey: number
-  onSelectFile: (path: string) => void
+  onInsertPath: (path: string) => void
+  onError: (error: unknown) => void
+  onNotice: (message: string) => void
 }
 
-export function FileTree({ repo, refreshKey, onSelectFile }: Props) {
+export function FileTree({ repo, refreshKey, onInsertPath, onError, onNotice }: Props) {
   const [entries, setEntries] = useState<Record<string, TreeEntry[]>>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [expanded, setExpanded] = useState<Set<string>>(() => expandedByRepo.get(repo) ?? new Set())
+  const [menu, setMenu] = useState<{ x: number; y: number; entry: TreeEntry } | null>(null)
+  const closeMenu = useCallback(() => setMenu(null), [])
   const expandedRef = useRef(expanded)
   expandedRef.current = expanded
 
@@ -64,6 +71,42 @@ export function FileTree({ repo, refreshKey, onSelectFile }: Props) {
     if (opening) void load(dir)
   }
 
+  const trash = async (entry: TreeEntry) => {
+    const kind = entry.type === 'dir' ? 'フォルダ' : 'ファイル'
+    if (!window.confirm(`${kind}「${entry.path}」をゴミ箱に移動しますか？`)) return
+    try {
+      await api.trashFile(repo, entry.path)
+      if (entry.type === 'dir') {
+        updateExpanded(
+          (prev) =>
+            new Set([...prev].filter((p) => p !== entry.path && !p.startsWith(`${entry.path}/`)))
+        )
+      }
+      await load(parentDir(entry.path))
+    } catch (error) {
+      onError(error)
+    }
+  }
+
+  const menuItems = (entry: TreeEntry): MenuItem[] => [
+    {
+      label: entry.type === 'dir' ? 'Finder で開く' : 'ファイルを開く',
+      onSelect: () =>
+        void api.openFile(repo, entry.path).then((result) => {
+          if (result.revealed) {
+            onNotice('開くと実行されるファイルのため、開かずに Finder で場所を表示しました')
+          }
+        }, onError),
+    },
+    { label: '@パスを挿入', onSelect: () => onInsertPath(entry.path) },
+    {
+      label: '削除（ゴミ箱に移動）',
+      danger: true,
+      separatorBefore: true,
+      onSelect: () => void trash(entry),
+    },
+  ]
+
   const renderDir = (dir: string, depth: number): ReactNode => {
     const indent = { paddingLeft: 8 + depth * 14 }
     const list = entries[dir]
@@ -86,10 +129,18 @@ export function FileTree({ repo, refreshKey, onSelectFile }: Props) {
       return (
         <Fragment key={entry.path}>
           <div
-            className={`tree-row${entry.ignored ? ' ignored' : ''}`}
+            className={`tree-row${entry.ignored ? ' ignored' : ''}${menu?.entry.path === entry.path ? ' menu-open' : ''}`}
             style={indent}
-            title={entry.type === 'file' ? `${entry.path}（クリックで入力欄に挿入）` : entry.path}
-            onClick={() => (entry.type === 'dir' ? toggle(entry.path) : onSelectFile(entry.path))}
+            title={
+              entry.type === 'file'
+                ? `${entry.path}（クリックで入力欄に挿入・右クリックでメニュー）`
+                : `${entry.path}（右クリックでメニュー）`
+            }
+            onClick={() => (entry.type === 'dir' ? toggle(entry.path) : onInsertPath(entry.path))}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              setMenu({ x: e.clientX, y: e.clientY, entry })
+            }}
           >
             <span className={`tree-caret${isOpen ? ' open' : ''}`}>
               {entry.type === 'dir' && <ChevronIcon />}
@@ -105,5 +156,12 @@ export function FileTree({ repo, refreshKey, onSelectFile }: Props) {
     })
   }
 
-  return <div className="tree">{renderDir('', 0)}</div>
+  return (
+    <div className="tree">
+      {renderDir('', 0)}
+      {menu && (
+        <ContextMenu x={menu.x} y={menu.y} items={menuItems(menu.entry)} onClose={closeMenu} />
+      )}
+    </div>
+  )
 }

@@ -100,6 +100,12 @@ export type ClientMessage =
       decision: PermissionDecision
     }
   | { type: 'refresh_usage' }
+  // タブごとのターミナル。open はシェルがなければ起動し、直近の出力を term_snapshot で返す
+  | { type: 'term_open'; tabId: string; cols: number; rows: number }
+  | { type: 'term_input'; tabId: string; data: string }
+  | { type: 'term_resize'; tabId: string; cols: number; rows: number }
+  // パネルを閉じた・タブを切り替えた。シェルは動かしたまま出力の送信だけ止める
+  | { type: 'term_close'; tabId: string }
 
 export type ServerMessage =
   | { type: 'tabs'; tabs: TabInfo[] }
@@ -112,3 +118,6 @@ export type ServerMessage =
   | { type: 'permission'; tabId: string; request: PermissionRequest }
   | { type: 'permission_resolved'; tabId: string; requestId: string }
   | { type: 'error'; tabId: string | null; message: string }
+  | { type: 'term_snapshot'; tabId: string; data: string }
+  | { type: 'term_output'; tabId: string; data: string }
+  | { type: 'term_exit'; tabId: string; exitCode: number }

@@ -64,6 +64,10 @@ export function reducer(state: AppState, action: Action): AppState {
         pending: l.pending.filter((p) => p.requestId !== action.requestId),
       }))
     case 'error':
+    // ターミナルの出力は terminalBus で直接ターミナルに渡す
+    case 'term_snapshot':
+    case 'term_output':
+    case 'term_exit':
       return state
   }
 }
