@@ -1,0 +1,59 @@
+{
+  "name": "claude-gui",
+  "productName": "Claude GUI",
+  "version": "0.1.0",
+  "description": "Claude Code と複数セッションでやり取りするデスクトップアプリ",
+  "private": true,
+  "type": "module",
+  "main": "dist-electron/main.mjs",
+  "scripts": {
+    "build": "vite build && esbuild electron/main.ts --bundle --platform=node --format=esm --packages=external --target=node22 --outfile=dist-electron/main.mjs",
+    "app": "yarn build && electron .",
+    "app:build": "yarn build && electron-builder --mac",
+    "start": "vite build && tsx server/main.ts",
+    "dev": "concurrently -k -n server,web -c blue,green \"CLAUDE_GUI_DEV=1 tsx watch server/main.ts\" \"vite\"",
+    "lint": "tsc --noEmit -p tsconfig.json && prettier --check .",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.317",
+    "ws": "^8.22.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/ws": "^8.18.2",
+    "@vitejs/plugin-react": "^6.2.1",
+    "concurrently": "^10.0.6",
+    "electron": "^45.2.1",
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2",
+    "prettier": "^3.9.10",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5"
+  },
+  "build": {
+    "appId": "io.github.aoki-yusuke-1119.claude-gui",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "asar": false,
+    "mac": {
+      "target": "dir",
+      "category": "public.app-category.developer-tools",
+      "identity": "-",
+      "hardenedRuntime": false
+    }
+  }
+}
