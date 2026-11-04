@@ -1,15 +1,14 @@
-import { type Query, query } from '@anthropic-ai/claude-agent-sdk'
+import type { Query } from '@anthropic-ai/claude-agent-sdk'
 
 import type { UsageInfo, UsageWindow } from '../shared/protocol'
 import { ROOT_DIR } from './config'
 import { errorMessage } from './errors'
 import { broadcast, clientCount } from './hub'
-import { MessageQueue } from './session'
+import { withTemporaryQuery, withTimeout } from './temporaryQuery'
 
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000
 // 応答完了のたびに問い合わせると複数タブ並行時に多すぎるので間隔をあける
 const MIN_TURN_END_INTERVAL_MS = 20 * 1000
-const TIMEOUT_MS = 20 * 1000
 
 type RateWindow = { utilization: number | null; resets_at: string | null } | null | undefined
 
@@ -19,27 +18,15 @@ function toWindow(window: RateWindow): UsageWindow | null {
 
 // CLI の /usage と同じデータ。SDK 側で実験的 API の扱いなので、形が変わったら取得エラーとして表示する
 function fetchUsage(q: Query) {
-  return Promise.race([
+  return withTimeout(
     q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true }),
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('使用量の取得がタイムアウトしました')), TIMEOUT_MS)
-    ),
-  ])
+    '使用量の取得がタイムアウトしました'
+  )
 }
 
-// 会話を送らない CLI を一時的に起動して問い合わせる（履歴・設定ファイルは使わない）
-async function fetchUsageWithTemporaryQuery() {
-  const queue = new MessageQueue()
-  const q = query({
-    prompt: queue,
-    options: { cwd: ROOT_DIR, persistSession: false, settingSources: [] },
-  })
-  try {
-    return await fetchUsage(q)
-  } finally {
-    q.close()
-    queue.close()
-  }
+// 一時的に起動する CLI では設定ファイルを使わない
+function fetchUsageWithTemporaryQuery() {
+  return withTemporaryQuery({ cwd: ROOT_DIR, settingSources: [] }, fetchUsage)
 }
 
 export class UsageMonitor {

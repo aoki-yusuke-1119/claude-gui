@@ -7,6 +7,7 @@ import { getSessionInfo, listSessions } from '@anthropic-ai/claude-agent-sdk'
 import { type WebSocket, WebSocketServer } from 'ws'
 
 import type { ClientMessage, PastSession, TabInfo } from '../shared/protocol'
+import { CommandCatalog } from './commands'
 import { DATA_FILE, DIST_DIR, PORT, ROOT_DIR } from './config'
 export { ROOT_DIR }
 import { errorMessage, HttpError } from './errors'
@@ -23,6 +24,7 @@ const store: TabStore = new TabStore(DATA_FILE, () =>
 const usage: UsageMonitor = new UsageMonitor(() => sessions.anyActiveQuery())
 const sessions = new SessionManager(store, (query) => usage.onTurnEnd(query))
 const terminals = new TerminalManager()
+const commands = new CommandCatalog((repo) => sessions.activeQueryIn(repo))
 
 const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]'])
 // 開発時（yarn dev）だけ Vite の画面（vite.config.ts の server.port）からの接続も許可する
@@ -50,10 +52,14 @@ function isAllowedHost(value: string): boolean {
 
 // このサーバーは Claude にコマンドを実行させられるため、DNS リバインディングや、他サイト・
 // localhost の別ポートで動くページからの WebSocket / POST を拒否し、このアプリの画面からのみ受け付ける。
-// Origin なしはブラウザ以外（ローカルのプロセス）からのアクセスなので許可する
+// Origin の付かない GET（画像の読み込みなど）も、ブラウザが付ける Sec-Fetch-Site で他のページからのものを拒否する。
+// どちらもないのはブラウザ以外（ローカルのプロセス）からのアクセスなので許可する
 function isLocalRequest(req: http.IncomingMessage): boolean {
   try {
     if (!isAllowedHost(`http://${req.headers.host}`)) return false
+    // same-origin はこの画面から、none はアドレスバーへの直接入力
+    const site = req.headers['sec-fetch-site']
+    if (site !== undefined && site !== 'same-origin' && site !== 'none') return false
     const origin = req.headers.origin
     return !origin || (origin.startsWith('http://') && isAllowedHost(origin))
   } catch {
@@ -148,6 +154,11 @@ async function handleApi(req: http.IncomingMessage, url: URL): Promise<unknown> 
     if (route === '/api/files/open') return { ok: true, ...(await openEntry(repo, relPath)) }
     await trashEntry(repo, relPath)
     return { ok: true }
+  }
+  if (method === 'GET' && route === '/api/commands') {
+    const repo = stringParam(url, 'repo')
+    await assertRepo(repo)
+    return { commands: await commands.list(repo) }
   }
   if (method === 'GET' && route === '/api/sessions') {
     const repo = stringParam(url, 'repo')

@@ -32,6 +32,13 @@ export interface PastSession {
   openTabId: string | null
 }
 
+export interface SlashCommandInfo {
+  name: string
+  description: string
+  argumentHint: string
+  aliases: string[]
+}
+
 export type DisplayItem =
   | { kind: 'user'; id: string; text: string }
   | { kind: 'assistant'; id: string; text: string; parentToolUseId: string | null }
