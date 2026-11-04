@@ -127,6 +127,7 @@ export function ChatPane(props: Props) {
         )}
       </div>
       <Composer
+        repo={tab.repo}
         value={props.draft}
         busy={live?.busy ?? false}
         connected={props.connected && live !== undefined}

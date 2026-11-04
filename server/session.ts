@@ -434,6 +434,13 @@ export class SessionManager {
     return null
   }
 
+  activeQueryIn(repo: string): Query | null {
+    for (const [tabId, session] of this.sessions) {
+      if (session.activeQuery && this.store.get(tabId)?.repo === repo) return session.activeQuery
+    }
+    return null
+  }
+
   close(tabId: string): void {
     this.sessions.get(tabId)?.close()
     this.sessions.delete(tabId)

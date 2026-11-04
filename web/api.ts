@@ -2,6 +2,7 @@ import type {
   PastSession,
   PermissionModeOption,
   RepoInfo,
+  SlashCommandInfo,
   TabInfo,
   TreeEntry,
 } from '../shared/protocol'
@@ -28,6 +29,11 @@ export const api = {
     request<{ ok: true; revealed: boolean }>('POST', '/api/files/open', { repo, path }),
   trashFile: (repo: string, path: string) =>
     request<{ ok: true }>('POST', '/api/files/trash', { repo, path }),
+  commands: (repo: string) =>
+    request<{ commands: SlashCommandInfo[] }>(
+      'GET',
+      `/api/commands?${new URLSearchParams({ repo }).toString()}`
+    ).then((r) => r.commands),
   sessions: (repo: string) =>
     request<{ sessions: PastSession[] }>(
       'GET',
