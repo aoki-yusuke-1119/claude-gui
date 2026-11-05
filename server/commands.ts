@@ -32,12 +32,16 @@ function toInfo(commands: SlashCommand[]): SlashCommandInfo[] {
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
+function fetchCommands(q: Query): Promise<SlashCommand[]> {
+  return withTimeout(q.supportedCommands(), TIMEOUT_MESSAGE)
+}
+
 // プロジェクトのコマンド・スキル・プラグインも含めるため設定ファイルは読み込むが、
 // 一覧を取るだけなので hook の実行と MCP サーバーへの接続は止める
 function fetchWithTemporaryQuery(repo: string): Promise<SlashCommand[]> {
   return withTemporaryQuery(
     { cwd: repoPath(repo), strictMcpConfig: true, settings: { disableAllHooks: true } },
-    (q) => withTimeout(q.supportedCommands(), TIMEOUT_MESSAGE)
+    fetchCommands
   )
 }
 
@@ -53,7 +57,11 @@ export class CommandCatalog {
     const cached = this.cache.get(repo)
     if (!cached) return this.refresh(repo)
     if (Date.now() - cached.fetchedAt >= CACHE_TTL_MS) {
-      this.refresh(repo).catch((error: unknown) => console.error(error))
+      this.refresh(repo).catch((error: unknown) => {
+        console.error(error)
+        // 失敗が続く間、メニューを開くたびに CLI を起動しないよう間隔をあける
+        cached.fetchedAt = Date.now()
+      })
     }
     return cached.commands
   }
@@ -70,9 +78,7 @@ export class CommandCatalog {
   private async load(repo: string): Promise<SlashCommandInfo[]> {
     const active = this.activeQueryIn(repo)
     const commands = toInfo(
-      active
-        ? await withTimeout(active.supportedCommands(), TIMEOUT_MESSAGE)
-        : await fetchWithTemporaryQuery(repo)
+      active ? await fetchCommands(active) : await fetchWithTemporaryQuery(repo)
     )
     this.cache.set(repo, { commands, fetchedAt: Date.now() })
     return commands

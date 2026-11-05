@@ -4,7 +4,7 @@ import path from 'node:path'
 
 import type { RepoInfo, TreeEntry } from '../shared/protocol'
 import { ROOT_DIR } from './config'
-import { HttpError } from './errors'
+import { errorMessage, HttpError } from './errors'
 
 // ROOT_DIR 自体を対象にするときのリポジトリ ID
 export const ROOT_REPO_ID = '.'
@@ -84,18 +84,36 @@ const LAUNCHABLE_EXTENSIONS = new Set([
   '.mpkg',
 ])
 
-// 既定のアプリで開く（フォルダなら Finder）。実行されてしまうものは開かず Finder で場所を表示する
+// open が「開けるアプリがない」で失敗したときのコード（kLSApplicationNotFoundErr）。
+// メッセージの言語に左右されないよう、文言ではなくコードで判定する
+const NO_APPLICATION_ERROR = 'Code=-10814'
+
+async function openWithFallback(target: string): Promise<void> {
+  try {
+    await run('open', [target])
+  } catch (error) {
+    if (!errorMessage(error).includes(NO_APPLICATION_ERROR)) throw error
+    await run('open', ['-a', 'TextEdit', target])
+  }
+}
+
+// 既定のアプリで開く（フォルダなら Finder、対応するアプリがなければテキストエディット）。
+// 実行されてしまうものは開かず Finder で場所を表示する
 export async function openEntry(repo: string, relPath: string): Promise<{ revealed: boolean }> {
   const target = await resolveEntry(repo, relPath)
-  const stat = await fs.stat(target).catch(() => null)
+  // open はシンボリックリンクの先を開くので、リンク先の種類で判定する
+  const realPath = await fs.realpath(target).catch(() => target)
+  const stat = await fs.stat(realPath).catch(() => null)
   const launchable =
     !stat ||
-    LAUNCHABLE_EXTENSIONS.has(path.extname(target).toLowerCase()) ||
+    LAUNCHABLE_EXTENSIONS.has(path.extname(realPath).toLowerCase()) ||
     (stat.isFile() && (stat.mode & 0o111) !== 0)
   if (process.platform !== 'darwin') {
     await run('xdg-open', [launchable ? path.dirname(target) : target])
+  } else if (launchable) {
+    await run('open', ['-R', target])
   } else {
-    await run('open', launchable ? ['-R', target] : [target])
+    await openWithFallback(target)
   }
   return { revealed: launchable }
 }
