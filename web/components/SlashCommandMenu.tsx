@@ -3,6 +3,7 @@ import {
   type ReactNode,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -97,8 +98,16 @@ export function useSlashCommandMenu({ repo, value, focused, onPick }: Options) {
   const open = focused && COMMAND_TOKEN.test(value) && value !== dismissed
   const { commands, error } = useCommands(repo, open)
   const query = value.slice(1)
-  const items = open && commands ? matchCommands(commands, query) : []
-  const index = selection.query === query ? Math.min(selection.index, items.length - 1) : 0
+  // 応答のストリーミング中は毎フレーム再描画されるので、絞り込みは入力が変わったときだけにする
+  const items = useMemo(
+    () => (open && commands ? matchCommands(commands, query) : []),
+    [open, commands, query]
+  )
+  // 閉じたり入力が変わったりしたら先頭に戻す（開き直したときに前回の位置を引き継がない）
+  if (selection.index !== 0 && (!open || selection.query !== query)) {
+    setSelection({ query, index: 0 })
+  }
+  const index = Math.min(selection.index, items.length - 1)
   // 一致するものがあれば一覧を、一覧がまだ届いていなければ取得の状況を出す（一致なしなら何も出さない）
   const visible = items.length > 0 || (open && !commands)
 
@@ -168,7 +177,9 @@ export function useSlashCommandMenu({ repo, value, focused, onPick }: Options) {
             aria-selected={i === index}
             className={i === index ? 'slash-item selected' : 'slash-item'}
             title={command.description}
-            onMouseDown={() => pick(command)}
+            onMouseDown={(e) => {
+              if (e.button === 0) pick(command)
+            }}
             onMouseMove={() => {
               if (i !== index) setSelection({ query, index: i })
             }}
