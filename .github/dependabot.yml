@@ -2,8 +2,12 @@ version: 2
 updates:
   - package-ecosystem: npm
     directory: /
+    # 日本時間の月曜 9 時に確認する（指定しないと UTC 基準になり、日本時間の月曜 9 時〜火曜 9 時のどこかで動く）
     schedule:
       interval: weekly
+      day: monday
+      time: '09:00'
+      timezone: Asia/Tokyo
     # マイナー・パッチは1つの PR にまとめる（メジャーはパッケージごとに別の PR）
     groups:
       minor-and-patch:
