@@ -17,32 +17,32 @@
     "format": "prettier --write ."
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.318",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.323",
     "node-pty": "1.1.0",
-    "ws": "^8.22.1"
+    "ws": "^8.23.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/ws": "^8.18.2",
-    "@vitejs/plugin-react": "^6.2.1",
+    "@vitejs/plugin-react": "^6.3.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-unicode11": "^0.9.0",
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/xterm": "^6.0.0",
-    "concurrently": "^10.0.6",
-    "electron": "^45.2.3",
+    "concurrently": "^10.0.7",
+    "electron": "^45.3.1",
     "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
-    "prettier": "^3.9.10",
+    "prettier": "^3.10.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vite": "^8.3.6"
+    "vite": "^8.3.8"
   },
   "build": {
     "appId": "io.github.aoki-yusuke-1119.claude-gui",
